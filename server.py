@@ -15,7 +15,6 @@ class Proxy():
         # TODO: Implement authentication method
         self.authentication_method = 0
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.proxy_host = "0.0.0.0"
         self.proxy_port = 9999
         self.server_sock.bind((self.proxy_host, self.proxy_port))
@@ -76,6 +75,7 @@ class Proxy():
         # command to connect to remote server
         is_ok = False
         try:
+            sender_sock = None
             if command == 1:
                 # establish a tcp connection to the remote server
                 # creating the socket that will send data to the remote server
@@ -84,21 +84,25 @@ class Proxy():
                     socket_type = socket.AF_INET6
                 sender_sock = socket.socket(socket_type, socket.SOCK_STREAM)
                 sender_sock.connect((address, port))
-                print(f"[+] Connecting to: {address}:{port}")
-                remote_addr, remote_port = sender_sock.getsockname()
-                # sending packet to client that connection has been established
-                packet = b"".join(
-                    [
-                        self.socks_version.to_bytes(1, 'big'), 
-                        int(0).to_bytes(1, 'big'),
-                        int(0).to_bytes(1, 'big'),
-                        int(1).to_bytes(1, 'big'),
-                        socket.inet_pton(socket.AF_INET, remote_addr),
-                        int(remote_port).to_bytes(2, 'big')
-                    ]
-                )
-                sock.sendall(packet)    
-                is_ok = True            
+            else:
+                sock.close()
+                return
+            
+            print(f"[+] Connecting to: {address}:{port}")
+            remote_addr, remote_port = sender_sock.getsockname()
+            # sending packet to client that connection has been established
+            packet = b"".join(
+                [
+                    self.socks_version.to_bytes(1, 'big'), 
+                    int(0).to_bytes(1, 'big'),
+                    int(0).to_bytes(1, 'big'),
+                    int(1).to_bytes(1, 'big'),
+                    socket.inet_pton(socket.AF_INET, remote_addr),
+                    int(remote_port).to_bytes(2, 'big')
+                ]
+            )
+            sock.sendall(packet)    
+            is_ok = True            
         except Exception as e:
             print(f"[!] Error: {e}")
             # if error has occured while connecting to remote server send error packet back to user
@@ -115,7 +119,7 @@ class Proxy():
             sock.sendall(packet)
 
         # check if conection established successfully
-        if is_ok:
+        if is_ok and command == 1:
             # run the transaction between client and remote server
             self.run_transaction(sock, sender_sock)
         # at the end close the client connection
@@ -124,11 +128,7 @@ class Proxy():
     def run_transaction(self, c_sock : socket.socket, r_sock : socket.socket) -> None:
         while True:
             # switching between client and remote server is they available for reading
-            try:
-                read, _, _ = select([c_sock, r_sock], [], [], 1)
-            except Exception as e:
-                print(f"[!] Nothing to select from: {e}")
-                return
+            read, _, _ = select([c_sock, r_sock], [], [])
             # check if any of the sockets is available to read
             if not read:
                 continue
@@ -137,12 +137,12 @@ class Proxy():
                 # recieving data from read available socket
                 data = sock.recv(4096)
                 if not data:
-                    return
+                    break
                 # sending data respectively
-                if sock is r_sock:
-                    c_sock.send(data)
-                else:
+                if sock is c_sock:
                     r_sock.send(data)
+                else:
+                    c_sock.send(data)
 
     def listen(self) -> None:
         self.print_server_data()
@@ -164,6 +164,7 @@ def main():
         server.listen()
     except KeyboardInterrupt:
         print("[!] Exiting...")
+        server.server_sock.close()
         sys.exit(0)
 
 if __name__ == "__main__":
