@@ -42,8 +42,6 @@ class Proxy():
             address = socket.inet_ntop(socket.AF_INET6, address)
             return address
         
-
-
     def handle_client(self, sock : socket.socket, addr : tuple) -> None:
         # parsing the initiation packet
         # packet definitions can be found: https://medium.com/@nimit95/socks-5-a-proxy-protocol-b741d3bec66c
@@ -81,7 +79,10 @@ class Proxy():
             if command == 1:
                 # establish a tcp connection to the remote server
                 # creating the socket that will send data to the remote server
-                sender_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                socket_type = socket.AF_INET
+                if addr_type == 4:
+                    socket_type = socket.AF_INET6
+                sender_sock = socket.socket(socket_type, socket.SOCK_STREAM)
                 sender_sock.connect((address, port))
                 print(f"[+] Connecting to: {address}:{port}")
                 remote_addr, remote_port = sender_sock.getsockname()
@@ -123,22 +124,25 @@ class Proxy():
     def run_transaction(self, c_sock : socket.socket, r_sock : socket.socket) -> None:
         while True:
             # switching between client and remote server is they available for reading
-            read, _, _ = select([c_sock, r_sock], [], [])
+            try:
+                read, _, _ = select([c_sock, r_sock], [], [], 1)
+            except Exception as e:
+                print(f"[!] Nothing to select from: {e}")
+                return
+            # check if any of the sockets is available to read
+            if not read:
+                continue
 
-            if c_sock in read:
-                # recieving 2 kb from client
-                data_from_client = c_sock.recv(2048)
-                # sending data to the remote server
-                if r_sock.send(data_from_client) <= 0:
-                    break
-            
-            # same exact thin but sending data from server to the client
-            if r_sock in read:
-                # recieving 2 kb from server
-                data_from_server = r_sock.recv(2048)
-                # send data to the client
-                if c_sock.send(data_from_server) <= 0:
-                    break
+            for sock in read:
+                # recieving data from read available socket
+                data = sock.recv(4096)
+                if not data:
+                    return
+                # sending data respectively
+                if sock is r_sock:
+                    c_sock.send(data)
+                else:
+                    r_sock.send(data)
 
     def listen(self) -> None:
         self.print_server_data()
